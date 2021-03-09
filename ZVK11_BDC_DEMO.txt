@@ -1,0 +1,147 @@
+report ZVK11_BDC_DEMO
+       no standard page heading line-size 255.
+
+include bdcrecx1.
+
+
+TYPES: BEGIN OF tp_itab,
+  vkorg(4), " organizational unit
+  vtweg(2), " distribution channel
+  matnr(18), " material number
+  amount(15), " select amount to be chatacter for internal table not dmbnr
+  END OF tp_itab.
+
+Data: gt_itab type STANDARD TABLE OF tp_itab,
+      gs_itab type tp_itab.
+
+DATA: gv_file TYPE string. " for gui upload
+
+  " since i need to upload a file I will have to give an option for the same.
+
+SELECTION-SCREEN SKIP.
+  PARAMETERS: p_file TYPE IBIPPARMS-PATH OBLIGATORY.
+  SELECTION-SCREEN SKIP.
+
+At SELECTION-SCREEN on VALUE-REQUEST FOR P_FILE.
+
+  CALL FUNCTION 'F4_FILENAME'
+*   EXPORTING
+*     PROGRAM_NAME        = SYST-CPROG
+*     DYNPRO_NUMBER       = SYST-DYNNR
+*     FIELD_NAME          = ' '
+   IMPORTING
+     FILE_NAME           = P_FILE.
+
+" Now when we upload the file the contents of the file should come inside the internal table.  gui_upload
+
+
+start-of-selection.
+
+" always clear the internal table before uploading the file.
+
+clear: gv_file, gt_itab[].
+
+gv_file = p_file. " gvfile will be the file that the user uploads from the screen.
+
+CALL FUNCTION 'GUI_UPLOAD'
+  EXPORTING
+    filename                      = GV_FILE
+   FILETYPE                      = 'ASC'
+   HAS_FIELD_SEPARATOR           = 'X'
+*   HEADER_LENGTH                 = 0
+*   READ_BY_LINE                  = 'X'
+*   DAT_MODE                      = ' '
+*   CODEPAGE                      = ' '
+*   IGNORE_CERR                   = ABAP_TRUE
+*   REPLACEMENT                   = '#'
+*   CHECK_BOM                     = ' '
+*   VIRUS_SCAN_PROFILE            =
+*   NO_AUTH_CHECK                 = ' '
+* IMPORTING
+*   FILELENGTH                    =
+*   HEADER                        =
+  tables
+    data_tab                      = gt_itab
+* CHANGING
+*   ISSCANPERFORMED               = ' '
+ EXCEPTIONS
+   FILE_OPEN_ERROR               = 1
+   FILE_READ_ERROR               = 2
+   NO_BATCH                      = 3
+   GUI_REFUSE_FILETRANSFER       = 4
+   INVALID_TYPE                  = 5
+   NO_AUTHORITY                  = 6
+   UNKNOWN_ERROR                 = 7
+   BAD_DATA_FORMAT               = 8
+   HEADER_NOT_ALLOWED            = 9
+   SEPARATOR_NOT_ALLOWED         = 10
+   HEADER_TOO_LONG               = 11
+   UNKNOWN_DP_ERROR              = 12
+   ACCESS_DENIED                 = 13
+   DP_OUT_OF_MEMORY              = 14
+   DISK_FULL                     = 15
+   DP_TIMEOUT                    = 16
+   OTHERS                        = 17
+          .
+IF sy-subrc <> 0.
+* Implement suitable error handling here
+ENDIF.
+
+" now from internal table we need to map the fields in bdc_data
+
+
+perform open_group.
+
+" since our record will be in loop we'll have to add a loop here.
+
+loop at gt_itab INTO gs_itab.
+
+perform bdc_dynpro      using 'SAPMV13A' '0100'.
+perform bdc_field       using 'BDC_CURSOR'
+                              'RV13A-KSCHL'.
+perform bdc_field       using 'BDC_OKCODE'
+                              '/00'.
+perform bdc_field       using 'RV13A-KSCHL'
+                              'PR00'.
+perform bdc_dynpro      using 'SAPLV14A' '0100'.
+perform bdc_field       using 'BDC_CURSOR'
+                              'RV130-SELKZ(04)'.
+perform bdc_field       using 'BDC_OKCODE'
+                              '=WEIT'.
+perform bdc_field       using 'RV130-SELKZ(01)'
+                              ''.
+perform bdc_field       using 'RV130-SELKZ(04)'
+                              'X'.
+perform bdc_dynpro      using 'SAPMV13A' '1304'.
+perform bdc_field       using 'BDC_CURSOR'
+                              'KONP-KBETR(01)'.
+perform bdc_field       using 'BDC_OKCODE'
+                              '/00'.
+perform bdc_field       using 'KOMG-VKORG'
+                              gs_itab-vkorg. "          '3000'.
+perform bdc_field       using 'KOMG-VTWEG'
+                              gs_itab-vtweg. "          '10'.
+perform bdc_field       using 'KOMG-MATNR(01)'
+                              gs_itab-matnr. "          'LSS-ASSM1'.
+
+" since we have amount in character field we need to condense the amount first.
+
+CONDENSE gs_itab-AMOUNT.
+
+perform bdc_field       using 'KONP-KBETR(01)'
+                              gs_itab-AMOUNT. "'              55'.
+perform bdc_dynpro      using 'SAPMV13A' '1304'.
+perform bdc_field       using 'BDC_CURSOR'
+                              'KOMG-MATNR(01)'.
+perform bdc_field       using 'BDC_OKCODE'
+                              '=SICH'.
+perform bdc_transaction using 'VK11'.
+
+
+" before endloop always clear the internal table workspace.
+
+CLEAR: gs_itab.
+
+ENDLOOP.
+
+perform close_group.
